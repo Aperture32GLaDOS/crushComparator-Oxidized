@@ -38,7 +38,7 @@ pub fn decrypt_rsa(data: &[u8], key: &Rsa<Private>) -> Vec<u8> {
     result
 }
 
-// Encrypts with AES, returns 12 bytes of IV and the remainder is the encrypted ciphertext
+// Encrypts with AES, returns 12 bytes of IV, 16 bytes of tag and the remainder is the encrypted ciphertext
 pub fn encrypt_aes(data: &[u8], key: &[u8; 32], tag: &mut [u8; 16]) -> Vec<u8> {
     let cipher: Cipher = Cipher::aes_256_gcm();
     let mut iv: [u8; 12] = [0; 12];
@@ -56,6 +56,7 @@ pub fn decrypt_aes(data: &[u8], key: &[u8; 32], iv: [u8; 12], tag: &[u8; 16]) ->
     decrypt_aead(cipher, key, Some(&iv), &[], data, tag).unwrap()
 }
 
+// Given data returned from encrypt_aes, split into its component parts and decrypt it
 pub fn read_and_decrypt_aes(data: &[u8], key: &[u8; 32]) -> Vec<u8> {
     let mut iv: [u8; 12] = [0; 12];
     let mut tag: [u8; 16] = [0; 16];
@@ -67,6 +68,17 @@ pub fn read_and_decrypt_aes(data: &[u8], key: &[u8; 32]) -> Vec<u8> {
     }
     let ciphertext: &[u8] = data.split_at(28).1;
     decrypt_aes(ciphertext, key, iv, &tag)
+}
+
+// Splits a message into n equal parts
+// Used for chunking large messages into smaller components
+pub fn split_message(message: &[u8], chunk_size: usize) -> Vec<Vec<u8>> {
+    let mut chunked_message: Vec<Vec<u8>> = Vec::new();
+    for i in 0..((message.len() / chunk_size)){
+        chunked_message.push(message.split_at(i * chunk_size).1.split_at(chunk_size).0.to_vec());
+    }
+    chunked_message.push(message.split_at(message.len() - message.len() % chunk_size).1.to_vec());
+    chunked_message
 }
 
 #[cfg(test)]

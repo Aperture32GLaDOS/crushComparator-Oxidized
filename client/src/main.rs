@@ -1,6 +1,6 @@
 use std::net::{TcpStream};
 use std::io::Write;
-use utils::{get_rsa_public_key, get_rsa_private_key, encrypt_rsa, encrypt_aes, decrypt_aes};
+use utils::{get_rsa_public_key, get_rsa_private_key, encrypt_rsa, encrypt_aes, decrypt_aes, split_message};
 use openssl::rsa::Rsa;
 use openssl::pkey::{Public, Private};
 use openssl::aes::AesKey;
