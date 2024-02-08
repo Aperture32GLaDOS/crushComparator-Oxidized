@@ -1,9 +1,8 @@
-use std::net::{TcpStream};
+use std::net::TcpStream;
 use std::io::Write;
-use utils::{get_rsa_public_key, get_rsa_private_key, encrypt_rsa, encrypt_aes, decrypt_aes, split_message};
+use utils::{get_rsa_public_key, encrypt_rsa, MessageType};
 use openssl::rsa::Rsa;
-use openssl::pkey::{Public, Private};
-use openssl::aes::AesKey;
+use openssl::pkey::Public;
 use openssl::rand::rand_bytes;
 
 fn main() -> std::io::Result<()>{
@@ -14,9 +13,8 @@ fn main() -> std::io::Result<()>{
     rand_bytes(&mut tag)?;
     let mut server_connection: TcpStream = TcpStream::connect("127.0.0.1:6666")?;
     let encrypted_aes_key: Vec<u8> = encrypt_rsa(&aes_key, &server_public_key);
-    server_connection.write(&encrypted_aes_key);
+    server_connection.write(&encrypted_aes_key).unwrap();
     let secret_message: &[u8] = "Hello".as_bytes();
-    let encrypted_message = encrypt_aes(secret_message, &aes_key, &mut tag);
-    server_connection.write(encrypted_message.as_slice());
+    utils::send_message(secret_message, MessageType::NORMAL, &mut server_connection, &aes_key, &mut tag);
     Ok(())
 }

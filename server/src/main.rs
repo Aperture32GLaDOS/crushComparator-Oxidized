@@ -1,9 +1,9 @@
-use std::net::{TcpStream, TcpListener};
+use std::net::TcpListener;
 mod clients;
 use clients::*;
-use utils::{get_rsa_private_key, decrypt_rsa};
+use utils::get_rsa_private_key;
 use openssl::rsa::Rsa;
-use openssl::pkey::{Public, Private};
+use openssl::pkey::Private;
 
 fn main() -> std::io::Result<()> {
     let mut all_clients: Vec<Client> = Vec::new();
