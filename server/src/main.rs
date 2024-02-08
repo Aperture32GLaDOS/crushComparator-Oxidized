@@ -6,7 +6,7 @@ use std::thread;
 use std::time::{self, Duration};
 mod clients;
 use clients::*;
-use utils::{get_rsa_private_key, receive_message, Message, MessageType};
+use utils::{get_rsa_private_key, Message, MessageType};
 use openssl::rsa::Rsa;
 use openssl::pkey::Private;
 
@@ -100,7 +100,7 @@ fn handle_events(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Arc<
     }
 }
 
-fn handle_client_messages(client: Arc<Mutex<Client>>, to_send: Arc<Mutex<VecDeque<Message>>>, events: Arc<Mutex<VecDeque<Event>>>, user_crush_client: Arc<Mutex<HashMap<String, Arc<Mutex<Client>>>>>) {
+fn handle_client_messages(client: Arc<Mutex<Client>>, user_crush_client: Arc<Mutex<HashMap<String, Arc<Mutex<Client>>>>>) {
     loop {
         {
             let mut client_guarded: MutexGuard<Client> = client.lock().unwrap();
@@ -175,12 +175,10 @@ fn main() -> std::io::Result<()> {
                 let new_client_arc_mutex: Arc<Mutex<Client>> = Arc::new(Mutex::new(new_client));
                 // Spawn a new thread to handle the client's messages
                 {
-                    let cloned_to_send = to_send_to_clients.clone();
-                    let cloned_events = events.clone();
                     let cloned_client = new_client_arc_mutex.clone();
                     let cloned_user_crush_client = user_crush_client.clone();
                     thread::spawn(move || {
-                        handle_client_messages(cloned_client, cloned_to_send, cloned_events, cloned_user_crush_client);
+                        handle_client_messages(cloned_client, cloned_user_crush_client);
                     });
                 }
                 // And append the client to all_clients

@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
-use std::io::{self, Read, Stdin, Write};
+use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, sleep};
 use std::time::Duration;
-use utils::{decrypt_rsa, encrypt_rsa, get_rsa_public_key, hash_string, receive_message, send_message, Message, MessageType};
+use utils::{decrypt_rsa, encrypt_rsa, get_rsa_public_key, receive_message, send_message, Message, MessageType};
 use openssl::rsa::Rsa;
 use openssl::pkey::{Public, Private};
 use openssl::rand::rand_bytes;
@@ -101,7 +101,7 @@ fn handle_peer_messages(peer: Arc<Mutex<Peer>>, public_key: Arc<Rsa<Public>>) {
     }
 }
 
-fn handle_events(all_peers: Arc<Mutex<Vec<Arc<Mutex<Peer>>>>>, events: Arc<Mutex<VecDeque<Event>>>, server_socket: Arc<Mutex<TcpStream>>, public_key: Arc<Rsa<Public>>, user_crush: String, crush_user: String, server_key: [u8; 32]) {
+fn handle_events(events: Arc<Mutex<VecDeque<Event>>>, server_socket: Arc<Mutex<TcpStream>>, public_key: Arc<Rsa<Public>>, user_crush: String, crush_user: String, server_key: [u8; 32]) {
     loop {
         {
             let mut event_guard: MutexGuard<VecDeque<Event>> = events.lock().unwrap();
@@ -126,7 +126,7 @@ fn handle_events(all_peers: Arc<Mutex<Vec<Arc<Mutex<Peer>>>>>, events: Arc<Mutex
                         send_message(Message::new(secret2, MessageType::Secret), &mut server_socket.lock().unwrap(), &server_key, &mut tag).unwrap();
                         println!("Secret sent");
                     },
-                    Event::PeerRemoved(peer) => {}
+                    Event::PeerRemoved(_) => {}
                 }
             }
             event_guard.pop_front();
@@ -140,11 +140,11 @@ fn main() -> std::io::Result<()>{
     let mut crush_name: String = String::new();
     let stdin = io::stdin();
     print!("Enter your name: ");
-    io::stdout().flush();
-    stdin.read_line(&mut user_name);
+    io::stdout().flush()?;
+    stdin.read_line(&mut user_name)?;
     print!("Enter the name of your crush: ");
-    io::stdout().flush();
-    stdin.read_line(&mut crush_name);
+    io::stdout().flush()?;
+    stdin.read_line(&mut crush_name)?;
     let user_crush: String = user_name.clone() + &crush_name;
     let crush_user: String = crush_name + &user_name;
     let server_public_key: Rsa<Public> = get_rsa_public_key("server.pub");
@@ -173,18 +173,16 @@ fn main() -> std::io::Result<()>{
         let cloned_peers = all_peers.clone();
         let cloned_events = events.clone();
         let cloned_socket = server_connection.clone();
-        let cloned_key = public_key.clone();
         thread::spawn(move || {
             listen_for_peers(socket.port().to_string(), cloned_peers, cloned_events, cloned_socket, private_key, aes_key.clone());
         });
     }
     {
-        let cloned_peers = all_peers.clone();
         let cloned_events = events.clone();
         let cloned_socket = server_connection.clone();
         let cloned_key = public_key.clone();
         thread::spawn(move || {
-            handle_events(cloned_peers, cloned_events, cloned_socket, cloned_key, user_crush, crush_user, aes_key);
+            handle_events(cloned_events, cloned_socket, cloned_key, user_crush, crush_user, aes_key);
         });
     }
     let message: Message = Message::new(public_key.public_key_to_pem().unwrap(), MessageType::InformPublicKey);

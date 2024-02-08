@@ -1,6 +1,6 @@
 use std::net::TcpStream;
 use std::io::Write;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use openssl::rand::rand_bytes;
 use openssl::rsa::Rsa;
 use openssl::pkey::Public;
@@ -22,10 +22,10 @@ impl Peer {
     pub fn new(address: String, public_key: Rsa<Public>) -> Self {
         let mut tcp_stream: TcpStream = TcpStream::connect(address).unwrap();
         let mut aes_key: [u8; 32] = [0; 32];
-        rand_bytes(&mut aes_key);
+        rand_bytes(&mut aes_key).unwrap();
         let mut tag: [u8; 16] = [0; 16];
-        rand_bytes(&mut tag);
-        tcp_stream.write(&encrypt_rsa(&aes_key, &public_key));
+        rand_bytes(&mut tag).unwrap();
+        tcp_stream.write(&encrypt_rsa(&aes_key, &public_key)).unwrap();
         Peer {tcp_stream, aes_key, public_key, tag}
     }
 
