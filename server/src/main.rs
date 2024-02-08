@@ -10,6 +10,7 @@ use utils::{get_rsa_private_key, Message, MessageType};
 use openssl::rsa::Rsa;
 use openssl::pkey::Private;
 
+// The entrypoint for the thread which constantly sends messages to clients
 fn send_to_clients(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Arc<Mutex<VecDeque<Message>>>, events: Arc<Mutex<VecDeque<Event>>>) {
     loop {
         sleep(time::Duration::from_millis(250));
@@ -71,7 +72,7 @@ fn handle_events(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Arc<
                 println!("Handling event...");
                 match events_deque.front().unwrap() {
                     Event::NewClient(client) => {
-                        // Wait for the client to tell their RSA key, and for all previous messages
+                        // Wait for the client to tell us their RSA key as well as their listener's address, as long as waiting for all previous messages
                         // to be handled
                         let client_lock: MutexGuard<Client> = client.lock().unwrap();
                         let mut to_send_lock: MutexGuard<VecDeque<Message>> = match to_send.try_lock() {

@@ -11,6 +11,7 @@ use openssl::rand::rand_bytes;
 mod peers;
 use peers::*;
 
+// The entrypoint for a thread which constantly waits for info from the main server
 fn listen_to_server(server_socket: Arc<Mutex<TcpStream>>, server_key: [u8; 32], events: Arc<Mutex<VecDeque<Event>>>, all_peers: Arc<Mutex<Vec<Arc<Mutex<Peer>>>>>) {
     loop {
         sleep(Duration::from_millis(200));
@@ -22,6 +23,7 @@ fn listen_to_server(server_socket: Arc<Mutex<TcpStream>>, server_key: [u8; 32], 
                 None => {continue;}
             };
             match message.message_type {
+                // If there is a new peer,
                 MessageType::AddPeer => {
                     let message_content: String = String::from_utf8(message.content).unwrap();
                     println!("New peer being added at {}...", message_content.split_terminator(",").collect::<Vec<&str>>()[0]);
@@ -30,6 +32,7 @@ fn listen_to_server(server_socket: Arc<Mutex<TcpStream>>, server_key: [u8; 32], 
                     {
                         all_peers.lock().unwrap().push(mutex_peer.clone());
                     }
+                    // Add the PeerAdded event to the event queue
                     events.lock().unwrap().push_back(Event::PeerAdded(mutex_peer));
                 }
                 MessageType::RemovePeer => {
@@ -43,16 +46,20 @@ fn listen_to_server(server_socket: Arc<Mutex<TcpStream>>, server_key: [u8; 32], 
     }
 }
 
+// The entrypoint for the thread which constantly listens for new peers to connect
 fn listen_for_peers(port: String, all_peers: Arc<Mutex<Vec<Arc<Mutex<Peer>>>>>, events: Arc<Mutex<VecDeque<Event>>>, server_socket: Arc<Mutex<TcpStream>>, key: Rsa<Private>, aes_key: [u8; 32]) {
     let listener: TcpListener = TcpListener::bind("127.0.0.1:".to_owned() + &port).unwrap();
     println!("Now listening on port {}...", listener.local_addr().unwrap());
+    // Inform the server of the listener's address
     let message: Message = Message::new(listener.local_addr().unwrap().to_string().as_bytes().to_vec(), MessageType::InformAddress);
     let mut tag: [u8; 16] = [0; 16];
     rand_bytes(&mut tag).unwrap();
     send_message(message, &mut server_socket.lock().unwrap(), &aes_key, &mut tag).unwrap();
     loop {
         {
+            // When a new peer connects,
             let mut new_stream: TcpStream = listener.accept().unwrap().0;
+            // Handshake with them
             let mut aes_key: [u8; 32] = [0; 32];
             let mut received_rsa_data: [u8; 256] = [0; 256];
             {
@@ -63,6 +70,7 @@ fn listen_for_peers(port: String, all_peers: Arc<Mutex<Vec<Arc<Mutex<Peer>>>>>, 
                 aes_key[i] = decrypted_data[i];
             }
             println!("Connecting to new peer...");
+            // And get their public key
             let message: Message = Message::new(new_stream.peer_addr().unwrap().to_string().as_bytes().to_vec(), MessageType::RequestPublicKey);
             println!("Connected to new peer");
             let mut tag: [u8; 16] = [0; 16];
@@ -82,6 +90,7 @@ fn listen_for_peers(port: String, all_peers: Arc<Mutex<Vec<Arc<Mutex<Peer>>>>>, 
     }
 }
 
+// The entrypoint for the thread which constantly handles messages from a peer
 fn handle_peer_messages(peer: Arc<Mutex<Peer>>, public_key: Arc<Rsa<Public>>) {
     loop {
         sleep(Duration::from_millis(200));
@@ -90,8 +99,10 @@ fn handle_peer_messages(peer: Arc<Mutex<Peer>>, public_key: Arc<Rsa<Public>>) {
                 Some(value) => value,
                 None => continue
             };
+            // If they want our public key,
             match message.message_type {
                 MessageType::RequestPublicKey => {
+                    // Send it to them
                     let message: Message = Message::new(public_key.public_key_to_pem().unwrap(), MessageType::NORMAL);
                     peer.lock().unwrap().send_message(message);
                 },
@@ -101,6 +112,7 @@ fn handle_peer_messages(peer: Arc<Mutex<Peer>>, public_key: Arc<Rsa<Public>>) {
     }
 }
 
+// The entrypoint for the thread which constantly handles events
 fn handle_events(events: Arc<Mutex<VecDeque<Event>>>, server_socket: Arc<Mutex<TcpStream>>, public_key: Arc<Rsa<Public>>, user_crush: String, crush_user: String, server_key: [u8; 32]) {
     loop {
         {
@@ -108,14 +120,17 @@ fn handle_events(events: Arc<Mutex<VecDeque<Event>>>, server_socket: Arc<Mutex<T
             if event_guard.len() > 0 {
                 let event: &Event = event_guard.front().unwrap();
                 match event {
+                    // If a new peer has been added,
                     Event::PeerAdded(peer) => {
                         {
                             let cloned_peer = peer.clone();
                             let cloned_public_key = public_key.clone();
                             thread::spawn(move || {
+                                // Spawn a new thread to handle any traffic from them
                                 handle_peer_messages(cloned_peer, cloned_public_key);
                             });
                         }
+                        // And send the server the shared secret with them
                         let aes_key = peer.lock().unwrap().aes_key;
                         let secret1: Vec<u8>= format!("{}{:x?}", user_crush, aes_key).as_bytes().to_vec();
                         let secret2: Vec<u8> = format!("{}{:x?}", crush_user, aes_key).as_bytes().to_vec();
