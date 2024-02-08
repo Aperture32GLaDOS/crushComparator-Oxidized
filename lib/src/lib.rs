@@ -5,6 +5,7 @@ use std::net::TcpStream;
 use openssl::rand::rand_bytes;
 use openssl::rsa::{Rsa, Padding};
 use openssl::pkey::{Public, Private};
+use openssl::sha::sha256;
 use openssl::symm::{decrypt_aead, encrypt_aead, Cipher};
 
 #[derive(Debug)]
@@ -13,7 +14,11 @@ pub enum MessageType {
     NORMAL,
     DEBUG,
     RemovePeer,
-    AddPeer
+    AddPeer,
+    RequestPublicKey,
+    InformPublicKey,
+    InformAddress,
+    Secret
 }
 
 impl MessageType {
@@ -22,7 +27,11 @@ impl MessageType {
             Self::NORMAL => [0],
             Self::DEBUG => [1],
             Self::RemovePeer => [2],
-            Self::AddPeer => [3]
+            Self::AddPeer => [3],
+            Self::RequestPublicKey => [4],
+            Self::InformPublicKey => [5],
+            Self::InformAddress => [6],
+            Self::Secret => [7]
         }
     }
 
@@ -32,6 +41,10 @@ impl MessageType {
             [1] => Self::DEBUG,
             [2] => Self::RemovePeer,
             [3] => Self::AddPeer,
+            [4] => Self::RequestPublicKey,
+            [5] => Self::InformPublicKey,
+            [6] => Self::InformAddress,
+            [7] => Self::Secret,
             _ => panic!("Unexpected bytes in MessageType reading")
         }
     }
@@ -202,7 +215,10 @@ pub fn send_message(message: Message, tcp_stream: &mut TcpStream, key: &[u8; 32]
 
 pub fn receive_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Option<Message> {
     let mut encrypted_message_header: [u8; 37] = [0; 37];
-    tcp_stream.read(&mut encrypted_message_header).unwrap();
+    match tcp_stream.read(&mut encrypted_message_header) {
+        Ok(value) => value,
+        Err(_) => {return None}
+    };
     let message_header_bytes: Vec<u8> = match read_and_decrypt_aes(&encrypted_message_header, key) {
         Some(value) => value,
         None => return None
@@ -220,6 +236,10 @@ pub fn receive_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Option<Mes
         _ => {}
     }
     Some(Message::new(message, header.message_type))
+}
+
+pub fn hash_string(input: String) -> [u8; 32] {
+    sha256(input.as_bytes())
 }
 
 #[cfg(test)]
