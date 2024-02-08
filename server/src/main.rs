@@ -16,17 +16,21 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::thread::sleep;
 use std::thread;
+use std::thread::sleep;
 use std::time::{self, Duration};
 mod clients;
 use clients::*;
-use utils::{get_rsa_private_key, Message, MessageType};
-use openssl::rsa::Rsa;
 use openssl::pkey::Private;
+use openssl::rsa::Rsa;
+use utils::{get_rsa_private_key, Message, MessageType};
 
 // The entrypoint for the thread which constantly sends messages to clients
-fn send_to_clients(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Arc<Mutex<VecDeque<Message>>>, events: Arc<Mutex<VecDeque<Event>>>) {
+fn send_to_clients(
+    all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>,
+    to_send: Arc<Mutex<VecDeque<Message>>>,
+    events: Arc<Mutex<VecDeque<Event>>>,
+) {
     loop {
         sleep(time::Duration::from_millis(250));
         {
@@ -55,7 +59,12 @@ fn send_to_clients(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Ar
                                 has_succeeded = false;
                                 continue;
                             }
-                            if client_guard.server_address.clone().unwrap() == String::from_utf8(message.content.clone()).unwrap().split_terminator(",").collect::<Vec<&str>>()[0] {
+                            if client_guard.server_address.clone().unwrap()
+                                == String::from_utf8(message.content.clone())
+                                    .unwrap()
+                                    .split_terminator(",")
+                                    .collect::<Vec<&str>>()[0]
+                            {
                                 continue;
                             }
                             println!("Informing client of new peer...");
@@ -66,7 +75,10 @@ fn send_to_clients(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Ar
                         Ok(_) => {}
                         Err(err) => {
                             println!("{}", err);
-                            events.lock().unwrap().push_back(Event::ClientDisconnected(client.clone()));
+                            events
+                                .lock()
+                                .unwrap()
+                                .push_back(Event::ClientDisconnected(client.clone()));
                         }
                     }
                 }
@@ -78,7 +90,11 @@ fn send_to_clients(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Ar
     }
 }
 
-fn handle_events(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Arc<Mutex<VecDeque<Message>>>, events: Arc<Mutex<VecDeque<Event>>>) {
+fn handle_events(
+    all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>,
+    to_send: Arc<Mutex<VecDeque<Message>>>,
+    events: Arc<Mutex<VecDeque<Event>>>,
+) {
     loop {
         sleep(time::Duration::from_millis(260));
         {
@@ -90,24 +106,60 @@ fn handle_events(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Arc<
                         // Wait for the client to tell us their RSA key as well as their listener's address, as long as waiting for all previous messages
                         // to be handled
                         let client_lock: MutexGuard<Client> = client.lock().unwrap();
-                        let mut to_send_lock: MutexGuard<VecDeque<Message>> = match to_send.try_lock() {
-                            Ok(val) => val,
-                            Err(_) => continue
-                        };
-                        if client_lock.public_key.is_none() || client_lock.server_address.is_none() || to_send_lock.len() > 0 {
+                        let mut to_send_lock: MutexGuard<VecDeque<Message>> =
+                            match to_send.try_lock() {
+                                Ok(val) => val,
+                                Err(_) => continue,
+                            };
+                        if client_lock.public_key.is_none()
+                            || client_lock.server_address.is_none()
+                            || to_send_lock.len() > 0
+                        {
                             continue;
                         }
                         let mut message_content: String;
                         message_content = client_lock.server_address.clone().unwrap();
-                        message_content = message_content + "," + &String::from_utf8(client_lock.public_key.clone().unwrap().public_key_to_pem().unwrap()).unwrap();
-                        to_send_lock.push_back(Message::new(message_content.as_bytes().to_vec(), MessageType::AddPeer));
+                        message_content = message_content
+                            + ","
+                            + &String::from_utf8(
+                                client_lock
+                                    .public_key
+                                    .clone()
+                                    .unwrap()
+                                    .public_key_to_pem()
+                                    .unwrap(),
+                            )
+                            .unwrap();
+                        to_send_lock.push_back(Message::new(
+                            message_content.as_bytes().to_vec(),
+                            MessageType::AddPeer,
+                        ));
                     }
                     Event::ClientDisconnected(client) => {
                         println!("Client disconnected");
-                        let client_index: usize = all_clients.lock().unwrap().iter().position(|x| x.lock().unwrap().aes_key == client.lock().unwrap().aes_key).unwrap();
+                        let client_index: usize = all_clients
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .position(|x| {
+                                x.lock().unwrap().aes_key == client.lock().unwrap().aes_key
+                            })
+                            .unwrap();
                         all_clients.lock().unwrap().remove(client_index);
                         // Inform the clients that a peer should be removed
-                        to_send.lock().unwrap().push_back(Message::new(client.lock().unwrap().tcp_stream.peer_addr().unwrap().ip().to_string().as_bytes().to_vec(), MessageType::RemovePeer));
+                        to_send.lock().unwrap().push_back(Message::new(
+                            client
+                                .lock()
+                                .unwrap()
+                                .tcp_stream
+                                .peer_addr()
+                                .unwrap()
+                                .ip()
+                                .to_string()
+                                .as_bytes()
+                                .to_vec(),
+                            MessageType::RemovePeer,
+                        ));
                     }
                 }
                 events_deque.pop_front();
@@ -116,42 +168,64 @@ fn handle_events(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Arc<
     }
 }
 
-fn handle_client_messages(client: Arc<Mutex<Client>>, user_crush_client: Arc<Mutex<HashMap<String, Arc<Mutex<Client>>>>>) {
+fn handle_client_messages(
+    client: Arc<Mutex<Client>>,
+    user_crush_client: Arc<Mutex<HashMap<String, Arc<Mutex<Client>>>>>,
+) {
     loop {
         {
             let mut client_guarded: MutexGuard<Client> = client.lock().unwrap();
-            client_guarded.tcp_stream.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
-            client_guarded.tcp_stream.set_write_timeout(Some(Duration::from_millis(400))).unwrap();
+            client_guarded
+                .tcp_stream
+                .set_read_timeout(Some(Duration::from_millis(200)))
+                .unwrap();
+            client_guarded
+                .tcp_stream
+                .set_write_timeout(Some(Duration::from_millis(400)))
+                .unwrap();
             let received_message: Option<Message> = client_guarded.receive_message();
             match received_message {
-                Some(x) => {
-                    match x.message_type {
-                        MessageType::InformPublicKey => {
-                            client_guarded.public_key = Some(Rsa::public_key_from_pem(&x.content).unwrap());
-                        },
-                        MessageType::InformAddress => {
-                            client_guarded.server_address = Some(String::from_utf8(x.content).unwrap());
-                        },
-                        MessageType::Secret => {
-                            println!("Secret obtained from client");
-                            let mut user_crush_lock: MutexGuard<HashMap<String, Arc<Mutex<Client>>>> = match user_crush_client.try_lock() {
-                                Ok(val) => val,
-                                Err(_) => continue
-                            };
-                            let client_match = user_crush_lock.get(&String::from_utf8(x.content.clone()).unwrap());
-                            match client_match {
-                                Some(matched_client) => {
-                                    let message: Message = Message::new("MATCH OBTAINED".as_bytes().to_vec(), MessageType::DEBUG);
-                                    matched_client.lock().unwrap().send_message(message.clone()).unwrap();
-                                    client_guarded.send_message(message).unwrap();
-                                    user_crush_lock.remove(&String::from_utf8(x.content.clone()).unwrap());
-                                }
-                                None => {user_crush_lock.insert(String::from_utf8(x.content).unwrap(), client.clone());}
-                            }
-                        },
-                        _ => {}
+                Some(x) => match x.message_type {
+                    MessageType::InformPublicKey => {
+                        client_guarded.public_key =
+                            Some(Rsa::public_key_from_pem(&x.content).unwrap());
                     }
-                }, None => {}
+                    MessageType::InformAddress => {
+                        client_guarded.server_address = Some(String::from_utf8(x.content).unwrap());
+                    }
+                    MessageType::Secret => {
+                        println!("Secret obtained from client");
+                        let mut user_crush_lock: MutexGuard<HashMap<String, Arc<Mutex<Client>>>> =
+                            match user_crush_client.try_lock() {
+                                Ok(val) => val,
+                                Err(_) => continue,
+                            };
+                        let client_match =
+                            user_crush_lock.get(&String::from_utf8(x.content.clone()).unwrap());
+                        match client_match {
+                            Some(matched_client) => {
+                                let message: Message = Message::new(
+                                    "MATCH OBTAINED".as_bytes().to_vec(),
+                                    MessageType::DEBUG,
+                                );
+                                matched_client
+                                    .lock()
+                                    .unwrap()
+                                    .send_message(message.clone())
+                                    .unwrap();
+                                client_guarded.send_message(message).unwrap();
+                                user_crush_lock
+                                    .remove(&String::from_utf8(x.content.clone()).unwrap());
+                            }
+                            None => {
+                                user_crush_lock
+                                    .insert(String::from_utf8(x.content).unwrap(), client.clone());
+                            }
+                        }
+                    }
+                    _ => {}
+                },
+                None => {}
             }
         }
         sleep(Duration::from_millis(600));
@@ -163,7 +237,8 @@ fn main() -> std::io::Result<()> {
     let events: Arc<Mutex<VecDeque<Event>>> = Arc::new(Mutex::new(VecDeque::new()));
     let to_send_to_clients: Arc<Mutex<VecDeque<Message>>> = Arc::new(Mutex::new(VecDeque::new()));
     let rsa_private_key: Rsa<Private> = get_rsa_private_key("server.priv");
-    let user_crush_client: Arc<Mutex<HashMap<String, Arc<Mutex<Client>>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let user_crush_client: Arc<Mutex<HashMap<String, Arc<Mutex<Client>>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
     let server_socket: TcpListener = TcpListener::bind("127.0.0.1:6666")?;
     // Spawn the thread which sends messages to clients
     {
@@ -187,7 +262,12 @@ fn main() -> std::io::Result<()> {
         // On a client join,
         match incoming {
             Ok(stream) => {
-                let new_client: Client = Client::new(stream, &rsa_private_key, events.clone(), to_send_to_clients.clone());
+                let new_client: Client = Client::new(
+                    stream,
+                    &rsa_private_key,
+                    events.clone(),
+                    to_send_to_clients.clone(),
+                );
                 let new_client_arc_mutex: Arc<Mutex<Client>> = Arc::new(Mutex::new(new_client));
                 // Spawn a new thread to handle the client's messages
                 {
@@ -198,8 +278,14 @@ fn main() -> std::io::Result<()> {
                     });
                 }
                 // And append the client to all_clients
-                all_clients.lock().unwrap().push(new_client_arc_mutex.clone());
-                events.lock().unwrap().push_back(Event::NewClient(new_client_arc_mutex));
+                all_clients
+                    .lock()
+                    .unwrap()
+                    .push(new_client_arc_mutex.clone());
+                events
+                    .lock()
+                    .unwrap()
+                    .push_back(Event::NewClient(new_client_arc_mutex));
             }
             Err(_) => {}
         }

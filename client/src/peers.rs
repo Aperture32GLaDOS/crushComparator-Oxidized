@@ -13,24 +13,24 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::net::TcpStream;
-use std::io::Write;
-use std::sync::{Arc, Mutex};
+use openssl::pkey::Public;
 use openssl::rand::rand_bytes;
 use openssl::rsa::Rsa;
-use openssl::pkey::Public;
+use std::io::Write;
+use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
 use utils::{encrypt_rsa, receive_message, send_message, Message};
 
 pub enum Event {
     PeerAdded(Arc<Mutex<Peer>>),
-    PeerRemoved(Arc<Mutex<Peer>>)
+    PeerRemoved(Arc<Mutex<Peer>>),
 }
 
 pub struct Peer {
     pub tcp_stream: TcpStream,
     pub aes_key: [u8; 32],
     pub public_key: Rsa<Public>,
-    pub tag: [u8; 16]
+    pub tag: [u8; 16],
 }
 
 impl Peer {
@@ -40,8 +40,15 @@ impl Peer {
         rand_bytes(&mut aes_key).unwrap();
         let mut tag: [u8; 16] = [0; 16];
         rand_bytes(&mut tag).unwrap();
-        tcp_stream.write(&encrypt_rsa(&aes_key, &public_key)).unwrap();
-        Peer {tcp_stream, aes_key, public_key, tag}
+        tcp_stream
+            .write(&encrypt_rsa(&aes_key, &public_key))
+            .unwrap();
+        Peer {
+            tcp_stream,
+            aes_key,
+            public_key,
+            tag,
+        }
     }
 
     pub fn get_message(&mut self) -> Option<Message> {

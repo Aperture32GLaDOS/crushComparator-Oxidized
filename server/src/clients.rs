@@ -13,20 +13,19 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::net::TcpStream;
-use std::io::Read;
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use openssl::pkey::{Private, Public};
 use openssl::rand::rand_bytes;
 use openssl::rsa::Rsa;
-use openssl::pkey::{Public, Private};
+use std::collections::VecDeque;
+use std::io::Read;
+use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
 use utils::{decrypt_rsa, receive_message, send_message, Message};
-
 
 #[derive(Debug)]
 pub enum Event {
     NewClient(Arc<Mutex<Client>>),
-    ClientDisconnected(Arc<Mutex<Client>>)
+    ClientDisconnected(Arc<Mutex<Client>>),
 }
 
 #[derive(Debug)]
@@ -37,26 +36,46 @@ pub struct Client {
     pub events: Arc<Mutex<VecDeque<Event>>>,
     pub to_send: Arc<Mutex<VecDeque<Message>>>,
     pub public_key: Option<Rsa<Public>>,
-    pub server_address: Option<String>
+    pub server_address: Option<String>,
 }
 
-impl Client{
-    pub fn new(mut tcp_stream: TcpStream, key: &Rsa<Private>, events: Arc<Mutex<VecDeque<Event>>>, to_send: Arc<Mutex<VecDeque<Message>>>) -> Client {
+impl Client {
+    pub fn new(
+        mut tcp_stream: TcpStream,
+        key: &Rsa<Private>,
+        events: Arc<Mutex<VecDeque<Event>>>,
+        to_send: Arc<Mutex<VecDeque<Message>>>,
+    ) -> Client {
         let mut encrypted_aes: [u8; 256] = [0; 256];
         let mut tag: [u8; 16] = [0; 16];
         rand_bytes(&mut tag).unwrap();
-        tcp_stream.read(&mut encrypted_aes).expect("256 bytes of RSA encrypted data");
+        tcp_stream
+            .read(&mut encrypted_aes)
+            .expect("256 bytes of RSA encrypted data");
         let aes_key_decrypted: Vec<u8> = decrypt_rsa(&encrypted_aes, key);
         let mut aes_key: [u8; 32] = [0; 32];
         for i in 0..32 {
             aes_key[i] = aes_key_decrypted[i];
         }
-        let new_client = Client {tcp_stream, aes_key, tag, events, to_send, public_key: None, server_address: None};
+        let new_client = Client {
+            tcp_stream,
+            aes_key,
+            tag,
+            events,
+            to_send,
+            public_key: None,
+            server_address: None,
+        };
         new_client
     }
 
     pub fn send_message(&mut self, message: Message) -> Result<(), String> {
-        send_message(message, &mut self.tcp_stream, &mut self.aes_key, &mut self.tag)
+        send_message(
+            message,
+            &mut self.tcp_stream,
+            &mut self.aes_key,
+            &mut self.tag,
+        )
     }
 
     pub fn receive_message(&mut self) -> Option<Message> {

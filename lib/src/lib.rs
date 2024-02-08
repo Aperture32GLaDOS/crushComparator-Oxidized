@@ -14,17 +14,16 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use core::panic;
-use std::io::{Read, Write};
-use std::fs::File;
-use std::net::TcpStream;
+use openssl::pkey::{Private, Public};
 use openssl::rand::rand_bytes;
-use openssl::rsa::{Rsa, Padding};
-use openssl::pkey::{Public, Private};
+use openssl::rsa::{Padding, Rsa};
 use openssl::sha::sha256;
 use openssl::symm::{decrypt_aead, encrypt_aead, Cipher};
+use std::fs::File;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum MessageType {
     NORMAL,
     DEBUG,
@@ -33,7 +32,7 @@ pub enum MessageType {
     RequestPublicKey,
     InformPublicKey,
     InformAddress,
-    Secret
+    Secret,
 }
 
 impl MessageType {
@@ -46,7 +45,7 @@ impl MessageType {
             Self::RequestPublicKey => [4],
             Self::InformPublicKey => [5],
             Self::InformAddress => [6],
-            Self::Secret => [7]
+            Self::Secret => [7],
         }
     }
 
@@ -60,33 +59,38 @@ impl MessageType {
             [5] => Self::InformPublicKey,
             [6] => Self::InformAddress,
             [7] => Self::Secret,
-            _ => panic!("Unexpected bytes in MessageType reading")
+            _ => panic!("Unexpected bytes in MessageType reading"),
         }
     }
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Message {
     pub content: Vec<u8>,
-    pub message_type: MessageType
+    pub message_type: MessageType,
 }
 
 impl Message {
     pub fn new(content: Vec<u8>, message_type: MessageType) -> Self {
-        Message {content, message_type}
+        Message {
+            content,
+            message_type,
+        }
     }
 }
 
 #[derive(Debug)]
 struct MessageHeader {
     message_len: usize,
-    message_type: MessageType
+    message_type: MessageType,
 }
 
 impl MessageHeader {
     fn new(message: &[u8], message_type: MessageType) -> MessageHeader {
-        MessageHeader {message_len: message.len(), message_type}
+        MessageHeader {
+            message_len: message.len(),
+            message_type,
+        }
     }
 
     fn as_bytes(&self) -> [u8; 9] {
@@ -105,7 +109,10 @@ impl MessageHeader {
         for i in 0..8 {
             length_bytes[i] = bytes[i];
         }
-        MessageHeader{message_len: usize::from_be_bytes(length_bytes), message_type: MessageType::from_bytes(type_byte)}
+        MessageHeader {
+            message_len: usize::from_be_bytes(length_bytes),
+            message_type: MessageType::from_bytes(type_byte),
+        }
     }
 }
 
@@ -117,27 +124,31 @@ pub fn get_rsa_public_key(filepath: &str) -> Rsa<Public> {
     let mut file: File = File::open(filepath).expect("The filepath should be a valid path");
     let mut file_contents: String = String::new();
     file.read_to_string(&mut file_contents).unwrap();
-    Rsa::public_key_from_pem(file_contents.as_bytes()).expect("The file should be a valid PEM-encoded RSA public key")
+    Rsa::public_key_from_pem(file_contents.as_bytes())
+        .expect("The file should be a valid PEM-encoded RSA public key")
 }
 
 pub fn get_rsa_private_key(filepath: &str) -> Rsa<Private> {
     let mut file: File = File::open(filepath).expect("The filepath should be a valid path");
     let mut file_contents: String = String::new();
     file.read_to_string(&mut file_contents).unwrap();
-    Rsa::private_key_from_pem(file_contents.as_bytes()).expect("The file should be a valid PEM-encoded RSA private key")
+    Rsa::private_key_from_pem(file_contents.as_bytes())
+        .expect("The file should be a valid PEM-encoded RSA private key")
 }
 
 pub fn encrypt_rsa(data: &[u8], key: &Rsa<Public>) -> Vec<u8> {
     let mut result: Vec<u8> = Vec::new();
     result.resize(key.size() as usize, 0);
-    key.public_encrypt(data, result.as_mut_slice(), Padding::PKCS1).unwrap();
+    key.public_encrypt(data, result.as_mut_slice(), Padding::PKCS1)
+        .unwrap();
     result
 }
 
 pub fn decrypt_rsa(data: &[u8], key: &Rsa<Private>) -> Vec<u8> {
     let mut result: Vec<u8> = Vec::new();
     result.resize(key.size() as usize, 0);
-    key.private_decrypt(data, result.as_mut_slice(), Padding::PKCS1).unwrap();
+    key.private_decrypt(data, result.as_mut_slice(), Padding::PKCS1)
+        .unwrap();
     result
 }
 
@@ -158,7 +169,7 @@ pub fn decrypt_aes(data: &[u8], key: &[u8; 32], iv: [u8; 12], tag: &[u8; 16]) ->
     let cipher: Cipher = Cipher::aes_256_gcm();
     match decrypt_aead(cipher, key, Some(&iv), &[], data, tag) {
         Ok(decrypted) => Some(decrypted),
-        Err(_) => None
+        Err(_) => None,
     }
 }
 
@@ -180,29 +191,46 @@ pub fn read_and_decrypt_aes(data: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
 // Used for chunking large messages into smaller components
 pub fn split_message(message: &[u8], chunk_size: usize) -> Vec<Vec<u8>> {
     let mut chunked_message: Vec<Vec<u8>> = Vec::new();
-    for i in 0..((message.len() / chunk_size)){
-        chunked_message.push(message.split_at(i * chunk_size).1.split_at(chunk_size).0.to_vec());
+    for i in 0..(message.len() / chunk_size) {
+        chunked_message.push(
+            message
+                .split_at(i * chunk_size)
+                .1
+                .split_at(chunk_size)
+                .0
+                .to_vec(),
+        );
     }
-    chunked_message.push(message.split_at(message.len() - message.len() % chunk_size).1.to_vec());
+    chunked_message.push(
+        message
+            .split_at(message.len() - message.len() % chunk_size)
+            .1
+            .to_vec(),
+    );
     chunked_message
 }
 
 // Sends a message of any size to a given tcp stream
-pub fn send_bytes_message(message: &[u8], message_type: MessageType, tcp_stream: &mut TcpStream, key: &[u8; 32], tag: &mut [u8; 16]) -> Result<(), String>{
+pub fn send_bytes_message(
+    message: &[u8],
+    message_type: MessageType,
+    tcp_stream: &mut TcpStream,
+    key: &[u8; 32],
+    tag: &mut [u8; 16],
+) -> Result<(), String> {
     let message_header: MessageHeader = MessageHeader::new(message, message_type);
     let encrypted_message_header: Vec<u8> = encrypt_aes(&message_header.as_bytes(), key, tag);
     match tcp_stream.write(encrypted_message_header.as_slice()) {
-        Ok(_) => {},
-        Err(err) => {return Err(err.to_string())}
+        Ok(_) => {}
+        Err(err) => return Err(err.to_string()),
     };
     let encrypted_message: Vec<u8> = encrypt_aes(message, key, tag);
     match tcp_stream.write(encrypted_message.as_slice()) {
-        Ok(_) => {},
-        Err(err) => {return Err(err.to_string())}
+        Ok(_) => {}
+        Err(err) => return Err(err.to_string()),
     };
     Ok(())
 }
-
 
 // Receives a message of any size from a tcp stream
 pub fn receive_bytes_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Option<Vec<u8>> {
@@ -210,7 +238,7 @@ pub fn receive_bytes_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Opti
     tcp_stream.read(&mut encrypted_message_header).unwrap();
     let message_header_bytes: Vec<u8> = match read_and_decrypt_aes(&encrypted_message_header, key) {
         Some(value) => value,
-        None => return None
+        None => return None,
     };
     let header: MessageHeader = MessageHeader::from_bytes(message_header_bytes.as_slice());
     println!("{:?}", header);
@@ -219,24 +247,35 @@ pub fn receive_bytes_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Opti
     tcp_stream.read(encrypted_message.as_mut_slice()).unwrap();
     let message: Vec<u8> = match read_and_decrypt_aes(encrypted_message.as_slice(), key) {
         Some(value) => value,
-        None => return None
+        None => return None,
     };
     Some(message)
 }
 
-pub fn send_message(message: Message, tcp_stream: &mut TcpStream, key: &[u8; 32], tag: &mut [u8; 16]) -> Result<(), String> {
-    send_bytes_message(message.content.as_slice(), message.message_type, tcp_stream, key, tag)
+pub fn send_message(
+    message: Message,
+    tcp_stream: &mut TcpStream,
+    key: &[u8; 32],
+    tag: &mut [u8; 16],
+) -> Result<(), String> {
+    send_bytes_message(
+        message.content.as_slice(),
+        message.message_type,
+        tcp_stream,
+        key,
+        tag,
+    )
 }
 
 pub fn receive_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Option<Message> {
     let mut encrypted_message_header: [u8; 37] = [0; 37];
     match tcp_stream.read(&mut encrypted_message_header) {
         Ok(value) => value,
-        Err(_) => {return None}
+        Err(_) => return None,
     };
     let message_header_bytes: Vec<u8> = match read_and_decrypt_aes(&encrypted_message_header, key) {
         Some(value) => value,
-        None => return None
+        None => return None,
     };
     let header: MessageHeader = MessageHeader::from_bytes(message_header_bytes.as_slice());
     let mut encrypted_message: Vec<u8> = Vec::with_capacity(28 + header.message_len);
@@ -244,10 +283,12 @@ pub fn receive_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Option<Mes
     tcp_stream.read(encrypted_message.as_mut_slice()).unwrap();
     let message: Vec<u8> = match read_and_decrypt_aes(encrypted_message.as_slice(), key) {
         Some(value) => value,
-        None => return None
+        None => return None,
     };
     match header.message_type {
-        MessageType::DEBUG => {println!("{:?}", String::from_utf8(message.clone()))},
+        MessageType::DEBUG => {
+            println!("{:?}", String::from_utf8(message.clone()))
+        }
         _ => {}
     }
     Some(Message::new(message, header.message_type))
