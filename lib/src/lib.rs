@@ -8,6 +8,7 @@ use openssl::pkey::{Public, Private};
 use openssl::symm::{decrypt_aead, encrypt_aead, Cipher};
 
 #[derive(Debug)]
+#[derive(Clone)]
 pub enum MessageType {
     NORMAL,
     DEBUG
@@ -27,6 +28,19 @@ impl MessageType {
             [1] => Self::DEBUG,
             _ => panic!("Unexpected bytes in MessageType reading")
         }
+    }
+}
+
+#[derive(Debug)]
+#[derive(Clone)]
+pub struct Message {
+    content: Vec<u8>,
+    message_type: MessageType
+}
+
+impl Message {
+    pub fn new(content: Vec<u8>, message_type: MessageType) -> Self {
+        Message {content, message_type}
     }
 }
 
@@ -106,13 +120,16 @@ pub fn encrypt_aes(data: &[u8], key: &[u8; 32], tag: &mut [u8; 16]) -> Vec<u8> {
     encrypted
 }
 
-pub fn decrypt_aes(data: &[u8], key: &[u8; 32], iv: [u8; 12], tag: &[u8; 16]) -> Vec<u8> {
+pub fn decrypt_aes(data: &[u8], key: &[u8; 32], iv: [u8; 12], tag: &[u8; 16]) -> Option<Vec<u8>> {
     let cipher: Cipher = Cipher::aes_256_gcm();
-    decrypt_aead(cipher, key, Some(&iv), &[], data, tag).unwrap()
+    match decrypt_aead(cipher, key, Some(&iv), &[], data, tag) {
+        Ok(decrypted) => Some(decrypted),
+        Err(_) => None
+    }
 }
 
 // Given data returned from encrypt_aes, split into its component parts and decrypt it
-pub fn read_and_decrypt_aes(data: &[u8], key: &[u8; 32]) -> Vec<u8> {
+pub fn read_and_decrypt_aes(data: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
     let mut iv: [u8; 12] = [0; 12];
     let mut tag: [u8; 16] = [0; 16];
     for i in 0..12 {
@@ -137,26 +154,63 @@ pub fn split_message(message: &[u8], chunk_size: usize) -> Vec<Vec<u8>> {
 }
 
 // Sends a message of any size to a given tcp stream
-pub fn send_message(message: &[u8], message_type: MessageType, tcp_stream: &mut TcpStream, key: &[u8; 32], tag: &mut [u8; 16]) {
+pub fn send_bytes_message(message: &[u8], message_type: MessageType, tcp_stream: &mut TcpStream, key: &[u8; 32], tag: &mut [u8; 16]) -> Result<(), String>{
     let message_header: MessageHeader = MessageHeader::new(message, message_type);
     let encrypted_message_header: Vec<u8> = encrypt_aes(&message_header.as_bytes(), key, tag);
-    tcp_stream.write(encrypted_message_header.as_slice()).unwrap();
+    match tcp_stream.write(encrypted_message_header.as_slice()) {
+        Ok(_) => {},
+        Err(err) => {return Err(err.to_string())}
+    };
     let encrypted_message: Vec<u8> = encrypt_aes(message, key, tag);
-    tcp_stream.write(encrypted_message.as_slice()).unwrap();
+    match tcp_stream.write(encrypted_message.as_slice()) {
+        Ok(_) => {},
+        Err(err) => {return Err(err.to_string())}
+    };
+    Ok(())
 }
 
+
 // Receives a message of any size from a tcp stream
-pub fn receive_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Vec<u8> {
+pub fn receive_bytes_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Option<Vec<u8>> {
     let mut encrypted_message_header: [u8; 37] = [0; 37];
     tcp_stream.read(&mut encrypted_message_header).unwrap();
-    let message_header_bytes: Vec<u8> = read_and_decrypt_aes(&encrypted_message_header, key);
+    let message_header_bytes: Vec<u8> = match read_and_decrypt_aes(&encrypted_message_header, key) {
+        Some(value) => value,
+        None => return None
+    };
     let header: MessageHeader = MessageHeader::from_bytes(message_header_bytes.as_slice());
     println!("{:?}", header);
     let mut encrypted_message: Vec<u8> = Vec::with_capacity(28 + header.message_len);
     encrypted_message.resize(28 + header.message_len, 0);
     tcp_stream.read(encrypted_message.as_mut_slice()).unwrap();
-    let message: Vec<u8> = read_and_decrypt_aes(encrypted_message.as_slice(), key);
-    message
+    let message: Vec<u8> = match read_and_decrypt_aes(encrypted_message.as_slice(), key) {
+        Some(value) => value,
+        None => return None
+    };
+    Some(message)
+}
+
+pub fn send_message(message: Message, tcp_stream: &mut TcpStream, key: &[u8; 32], tag: &mut [u8; 16]) -> Result<(), String> {
+    send_bytes_message(message.content.as_slice(), message.message_type, tcp_stream, key, tag)
+}
+
+pub fn receive_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Option<Message> {
+    let mut encrypted_message_header: [u8; 37] = [0; 37];
+    tcp_stream.read(&mut encrypted_message_header).unwrap();
+    let message_header_bytes: Vec<u8> = match read_and_decrypt_aes(&encrypted_message_header, key) {
+        Some(value) => value,
+        None => return None
+    };
+    let header: MessageHeader = MessageHeader::from_bytes(message_header_bytes.as_slice());
+    println!("{:?}", header);
+    let mut encrypted_message: Vec<u8> = Vec::with_capacity(28 + header.message_len);
+    encrypted_message.resize(28 + header.message_len, 0);
+    tcp_stream.read(encrypted_message.as_mut_slice()).unwrap();
+    let message: Vec<u8> = match read_and_decrypt_aes(encrypted_message.as_slice(), key) {
+        Some(value) => value,
+        None => return None
+    };
+    Some(Message::new(message, header.message_type))
 }
 
 #[cfg(test)]
