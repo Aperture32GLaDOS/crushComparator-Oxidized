@@ -1,11 +1,24 @@
 use std::net::TcpStream;
 use std::io::Write;
-use utils::{encrypt_rsa, get_rsa_public_key, Message, MessageType};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread::sleep;
+use std::time::Duration;
+use utils::{encrypt_rsa, get_rsa_public_key, receive_message, Message, MessageType};
 use openssl::rsa::Rsa;
 use openssl::pkey::Public;
 use openssl::rand::rand_bytes;
 mod peers;
 use peers::*;
+
+fn listen_to_server(server_socket: Arc<Mutex<TcpStream>>, server_key: [u8; 32]) {
+    loop {
+        {
+            let mut server_socket_guarded: MutexGuard<TcpStream> = server_socket.lock().unwrap();
+            println!("{:?}", receive_message(&mut server_socket_guarded, &server_key));
+        }
+        sleep(Duration::from_secs(2));
+    }
+}
 
 fn main() -> std::io::Result<()>{
     let server_public_key: Rsa<Public> = get_rsa_public_key("server.pub");

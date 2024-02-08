@@ -11,7 +11,7 @@ use utils::{decrypt_rsa, receive_message, send_message, Message};
 
 
 pub enum Event {
-    NewClient,
+    NewClient(Arc<Mutex<Client>>),
     ClientDisconnected(Arc<Mutex<Client>>)
 }
 
@@ -34,7 +34,6 @@ impl Client{
         for i in 0..32 {
             aes_key[i] = aes_key_decrypted[i];
         }
-        events.lock().unwrap().push_back(Event::NewClient);
         let mut new_client = Client {tcp_stream, aes_key, tag, events, to_send};
         new_client
     }

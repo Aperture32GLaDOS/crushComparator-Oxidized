@@ -11,14 +11,18 @@ use openssl::symm::{decrypt_aead, encrypt_aead, Cipher};
 #[derive(Clone)]
 pub enum MessageType {
     NORMAL,
-    DEBUG
+    DEBUG,
+    RemovePeer,
+    AddPeer
 }
 
 impl MessageType {
     pub fn as_bytes(&self) -> [u8; 1] {
         match self {
             Self::NORMAL => [0],
-            Self::DEBUG => [1]
+            Self::DEBUG => [1],
+            Self::RemovePeer => [2],
+            Self::AddPeer => [3]
         }
     }
 
@@ -26,6 +30,8 @@ impl MessageType {
         match bytes {
             [0] => Self::NORMAL,
             [1] => Self::DEBUG,
+            [2] => Self::RemovePeer,
+            [3] => Self::AddPeer,
             _ => panic!("Unexpected bytes in MessageType reading")
         }
     }
@@ -34,8 +40,8 @@ impl MessageType {
 #[derive(Debug)]
 #[derive(Clone)]
 pub struct Message {
-    content: Vec<u8>,
-    message_type: MessageType
+    pub content: Vec<u8>,
+    pub message_type: MessageType
 }
 
 impl Message {
@@ -202,7 +208,6 @@ pub fn receive_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Option<Mes
         None => return None
     };
     let header: MessageHeader = MessageHeader::from_bytes(message_header_bytes.as_slice());
-    println!("{:?}", header);
     let mut encrypted_message: Vec<u8> = Vec::with_capacity(28 + header.message_len);
     encrypted_message.resize(28 + header.message_len, 0);
     tcp_stream.read(encrypted_message.as_mut_slice()).unwrap();
@@ -210,6 +215,10 @@ pub fn receive_message(tcp_stream: &mut TcpStream, key: &[u8; 32]) -> Option<Mes
         Some(value) => value,
         None => return None
     };
+    match header.message_type {
+        MessageType::DEBUG => {println!("{:?}", String::from_utf8(message.clone()))},
+        _ => {}
+    }
     Some(Message::new(message, header.message_type))
 }
 

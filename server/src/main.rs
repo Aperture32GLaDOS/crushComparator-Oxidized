@@ -18,6 +18,16 @@ fn send_to_clients(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Ar
                 for client in all_clients.lock().unwrap().iter() {
                     let message: Message = to_send_deque.front().unwrap().clone();
                     let mut client_guard: MutexGuard<Client> = client.lock().unwrap();
+                    match message.message_type {
+                        // If the message is informing clients of a new peer,
+                        MessageType::AddPeer => {
+                            // Then there is no need to inform the new peer
+                            if client_guard.tcp_stream.peer_addr().unwrap().ip().to_string().as_bytes().to_vec() == message.content {
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
                     match client_guard.send_message(message) {
                         Ok(_) => {}
                         Err(err) => {
@@ -39,13 +49,17 @@ fn handle_events(all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>>, to_send: Arc<
             let mut events_deque: MutexGuard<VecDeque<Event>> = events.lock().unwrap();
             if events_deque.len() > 0 {
                 match events_deque.front().unwrap() {
-                    Event::NewClient => {
-                        to_send.lock().unwrap().push_back(Message::new("New Client".as_bytes().to_vec(), MessageType::DEBUG));
+                    Event::NewClient(client) => {
+                        let new_address: String;
+                        new_address = client.lock().unwrap().tcp_stream.peer_addr().unwrap().ip().to_string();
+                        to_send.lock().unwrap().push_back(Message::new(new_address.as_bytes().to_vec(), MessageType::AddPeer));
                     }
                     Event::ClientDisconnected(client) => {
                         println!("Client disconnected");
                         let client_index: usize = all_clients.lock().unwrap().iter().position(|x| x.lock().unwrap().aes_key == client.lock().unwrap().aes_key).unwrap();
                         all_clients.lock().unwrap().remove(client_index);
+                        // Inform the clients that a peer should be removed
+                        to_send.lock().unwrap().push_back(Message::new(client.lock().unwrap().tcp_stream.peer_addr().unwrap().ip().to_string().as_bytes().to_vec(), MessageType::RemovePeer));
                     }
                 }
                 events_deque.pop_front();
@@ -73,7 +87,7 @@ fn handle_client_messages(client: Arc<Mutex<Client>>, to_send: Arc<Mutex<VecDequ
 }
 
 fn main() -> std::io::Result<()> {
-    let mut all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>> = Arc::new(Mutex::new(Vec::new()));
+    let all_clients: Arc<Mutex<Vec<Arc<Mutex<Client>>>>> = Arc::new(Mutex::new(Vec::new()));
     let events: Arc<Mutex<VecDeque<Event>>> = Arc::new(Mutex::new(VecDeque::new()));
     let to_send_to_clients: Arc<Mutex<VecDeque<Message>>> = Arc::new(Mutex::new(VecDeque::new()));
     let rsa_private_key: Rsa<Private> = get_rsa_private_key("server.priv");
@@ -113,6 +127,7 @@ fn main() -> std::io::Result<()> {
                 }
                 // And append the client to all_clients
                 all_clients.lock().unwrap().push(new_client_arc_mutex.clone());
+                events.lock().unwrap().push_back(Event::NewClient(new_client_arc_mutex));
             }
             Err(_) => {}
         }
